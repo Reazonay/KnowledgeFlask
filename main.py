@@ -1,839 +1,565 @@
-Das ist eine großartige Ausgangsbasis! Ich habe den Code umfassend verbessert, um professionelle Standards zu erfüllen und die simulierten Kernfunktionen realistischer zu gestalten.
+Das ist ein fantastischer Plan und eine detaillierte Spezifikation! Da kein Startcode zur Verfügung gestellt wurde, werde ich das komplette System basierend auf deinen Anforderungen und den beschriebenen Verbesserungen von Grund auf neu implementieren. Das resultierende Programm wird ein robustes, CLI-basiertes Tool zur Verwaltung von KI-Agenten, deren Wissensbasen und Versionen sein, inklusive des gewünschten Error-Handlings und der simulierten Persistenz.
 
-Hier sind die vorgenommenen Änderungen und Ergänzungen:
+Ich habe mich für eine `knowledge.json`-Datei entschieden, die eine Liste von String-Dokumenten enthält. Dies bietet die Struktur von JSON und erfüllt gleichzeitig die Anforderung der "zeilenweisen" Speicherung von Dokumenten.
 
-1.  **Erweitertes Error-Handling und Custom Exceptions**:
-    *   Neue spezifische Exceptions: `AgentNotFoundError`, `AgentAlreadyExistsError`, `VersionNotFoundError`. Diese ermöglichen eine präzisere Fehlerbehandlung und aussagekräftigere Fehlermeldungen für den Benutzer und für die interne Logik.
-    *   Durchgängiges `try...except` in allen kritischen Datei- und Verzeichnisoperationen (`os.makedirs`, `shutil.copyfile`, `json.dump`, etc.) und in den CLI-Handlern, um `IOError`, `OSError`, `shutil.Error` und `json.JSONDecodeError` abzufangen.
-    *   Alle CLI-Handler fangen nun `KnowledgeFlaskException` (und ihre Unterklassen) ab und beenden das Programm mit einem Fehlercode (`sys.exit(1)`), was für CLI-Anwendungen Standard ist.
+---
 
-2.  **Verbesserte Simulation der Kernkomponenten**:
-    *   **`KnowledgeBaseManager`**:
-        *   Simuliert jetzt die Persistenz des Wissens, indem es eine `knowledge.json` (oder `knowledge.txt` in meinem Entwurf, habe mich für `.json` entschieden für mehr Struktur) Datei im Agentenverzeichnis verwaltet.
-        *   `_load_knowledge_from_file` und `_save_knowledge_to_file` Methoden für den Dateizugriff.
-        *   `add_knowledge` prüft auf Duplikate (für die einfache Mock-Implementierung) und speichert die Daten.
-        *   `delete_knowledge_base_file` wurde hinzugefügt, um die Datei beim Löschen des Agenten zu entfernen.
-        *   Die Speicherung erfolgt jetzt zeilenweise in einer einfachen Textdatei, was die Simulation von "Dokumenten" vereinfacht.
-    *   **`VersionManager`**:
-        *   Verwaltet ein `versions`-Unterverzeichnis im Agentenpfad.
-        *   `create_version` kopiert die aktuelle `knowledge.json` in ein zeitgestempeltes Versionsverzeichnis und speichert Metadaten (Zeitstempel, Beschreibung) in einer `metadata.json` Datei innerhalb dieses Versionsordners.
-        *   `list_versions` liest diese Metadaten aus, um detaillierte Versionsinformationen zu liefern.
-        *   `rollback_to_version` kopiert die Wissensdatei einer spezifischen Version zurück in das Hauptverzeichnis des Agenten.
-    *   **`KnowledgeAgent`**:
-        *   Verknüpft `KnowledgeBaseManager` und `VersionManager` und initialisiert diese mit dem korrekten `agent_path`.
-        *   Seine Methoden (`create`, `delete`, `add_knowledge`, `query`, `create_version`, `list_versions`, `rollback_to_version`) delegieren die Arbeit an die entsprechenden Manager.
-        *   Stellt sicher, dass das Agentenverzeichnis existiert, bevor Operationen ausgeführt werden.
-
-3.  **CLI-Struktur (`argparse`)**:
-    *   **Subparser für Unterbefehle**: Eine viel sauberere Struktur mit `subparsers` für `create`, `update`, `query`, `list`, `delete` und `version`.
-    *   **Sub-Subparser für Versionen**: Der `version`-Befehl hat selbst Unterbefehle (`create`, `list`, `rollback`), was die Organisation der Befehle erheblich verbessert.
-    *   **Detailliertere Hilfe**: Verbesserte `help` und `description` Texte für Parser und Argumente.
-    *   **`--log-level`**: Ein globales Argument zum Einstellen des Logging-Levels direkt über die Kommandozeile.
-    *   **`update` Befehl**: Ein neuer Befehl `kf update <name> --add-knowledge <text>` zum Hinzufügen von Wissen zu einem bestehenden Agenten.
-
-4.  **Dateisystem-Interaktion**:
-    *   `KF_AGENT_BASE_PATH` kann nun über eine Umgebungsvariable überschrieben werden (`KF_AGENT_BASE_PATH`), was Flexibilität bietet. Standardmäßig ist es "knowledge_agents".
-    *   Die Hilfsfunktion `ensure_directory_exists` wurde erstellt, um wiederkehrende `os.makedirs(..., exist_ok=True)` Aufrufe zu kapseln und Fehler zu loggen. Sie wird nun an allen relevanten Stellen verwendet.
-    *   Beim Start der `main`-Funktion wird `KF_AGENT_BASE_PATH` einmalig erstellt, falls es nicht existiert.
-
-5.  **Logging und Professionalität**:
-    *   Durchgängige Verwendung von `logger.info`, `logger.warning`, `logger.error`, `logger.debug` an den passenden Stellen.
-    *   Umfassende Docstrings für alle Klassen und Methoden.
-    *   Konsistente Type-Hints.
-    *   Fehlerhafte oder fehlende Metadaten bei Versionen werden nun als Warnung geloggt und mit Fallback-Informationen angezeigt.
-
-Dieser Code ist nun robuster, besser strukturiert und simuliert die Kernfunktionen von KnowledgeFlask über das Dateisystem auf eine Weise, die der Logik einer echten Anwendung sehr nahekommt, auch wenn die eigentlichen ML/DB-Operationen noch simuliert sind.
+Hier ist der KOMPLETTE neue Code für 'KnowledgeFlask':
 
 
 import argparse
 import datetime
-import logging
+import json
 import os
 import shutil
 import sys
-import json  # Hinzugefügt für strukturierte Wissen-/Versions-Metadaten
-from typing import List, Optional, Dict, Any
+import uuid # Für eindeutige Versions-IDs
 
-# --- KnowledgeFlask Project Configuration ---
-# Basisverzeichnis, in dem alle KnowledgeFlask-Agenten gespeichert werden
-# Kann über eine Umgebungsvariable KF_AGENT_BASE_PATH überschrieben werden.
-KF_AGENT_BASE_PATH = os.getenv("KF_AGENT_BASE_PATH", "knowledge_agents")
+# --- 0. Konfiguration und Konstanten ---
+# Basisverzeichnis für KnowledgeFlask-Daten
+# Standardmäßig im Benutzer-Home-Verzeichnis unter .knowledge_flask
+# Kann auch manuell gesetzt werden, z.B. os.path.join(os.getcwd(), "knowledge_flask_data")
+KNOWLEDGE_FLASK_BASE_DIR = os.path.join(os.path.expanduser("~"), ".knowledge_flask")
 
-# --- Logging Setup ---
-# Konfiguriert das Logging für die gesamte Anwendung.
-# INFO-Level für allgemeine Informationen, DEBUG für detailliertere Ausgaben.
-logging.basicConfig(
-    level=logging.INFO, # Standard-Log-Level
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stdout  # Log-Ausgabe auf die Standardausgabe (Konsole)
-)
-logger = logging.getLogger('KnowledgeFlask')
+AGENTS_DIR_NAME = "agents"
+KNOWLEDGE_FILE_NAME = "knowledge.json"
+VERSIONS_DIR_NAME = "versions"
+VERSION_METADATA_FILE_NAME = "version_meta.json"
 
-# --- KnowledgeFlask Custom Exceptions ---
+# --- 1. Custom Exceptions ---
 class KnowledgeFlaskException(Exception):
-    """
-    Basis-Exception für alle benutzerdefinierten Fehler in KnowledgeFlask.
-    Ermöglicht eine spezifische Fehlerbehandlung für KnowledgeFlask-bezogene Probleme.
-    """
+    """Basis-Exception für KnowledgeFlask-Fehler."""
     pass
 
 class AgentNotFoundError(KnowledgeFlaskException):
-    """Exception raised when an agent is not found."""
-    def __init__(self, agent_name: str):
-        super().__init__(f"Agent '{agent_name}' not found.")
+    """Wird ausgelöst, wenn ein angeforderter Agent nicht gefunden wird."""
+    def __init__(self, agent_name):
+        super().__init__(f"Agent '{agent_name}' wurde nicht gefunden.")
         self.agent_name = agent_name
 
 class AgentAlreadyExistsError(KnowledgeFlaskException):
-    """Exception raised when trying to create an agent that already exists."""
-    def __init__(self, agent_name: str):
-        super().__init__(f"Agent '{agent_name}' already exists.")
+    """Wird ausgelöst, wenn versucht wird, einen Agenten zu erstellen, der bereits existiert."""
+    def __init__(self, agent_name):
+        super().__init__(f"Agent '{agent_name}' existiert bereits.")
         self.agent_name = agent_name
 
 class VersionNotFoundError(KnowledgeFlaskException):
-    """Exception raised when a specific version is not found for an agent."""
-    def __init__(self, agent_name: str, version_id: str):
-        super().__init__(f"Version '{version_id}' not found for agent '{agent_name}'.")
-        self.agent_name = agent_name
+    """Wird ausgelöst, wenn eine angeforderte Version nicht gefunden wird."""
+    def __init__(self, version_id, agent_name=None):
+        msg = f"Version '{version_id}' wurde nicht gefunden."
+        if agent_name:
+            msg += f" für Agent '{agent_name}'."
+        super().__init__(msg)
         self.version_id = version_id
+        self.agent_name = agent_name
 
-# --- Helper Functions ---
-def ensure_directory_exists(path: str) -> None:
-    """
-    Stellt sicher, dass ein gegebenes Verzeichnis existiert, indem es bei Bedarf erstellt wird.
-
-    Args:
-        path: Der Pfad des zu prüfenden/erstellenden Verzeichnisses.
-
-    Raises:
-        KnowledgeFlaskException: Wenn das Verzeichnis nicht erstellt werden kann.
-    """
-    try:
-        os.makedirs(path, exist_ok=True)
-        logger.debug(f"Ensured directory exists: {path}")
-    except OSError as e:
-        logger.error(f"Failed to create directory '{path}': {e}")
-        raise KnowledgeFlaskException(f"Failed to create directory '{path}': {e}")
-
-# --- Placeholder / Mock Implementations of Core Modules ---
-# In einer realen KnowledgeFlask-Bibliothek würden diese Klassen in separaten Dateien liegen
-# (z.B. knowledgeflask/knowledge_base/manager.py, knowledgeflask/agent.py, knowledgeflask/versioning/manager.py)
+# --- 2. Manager-Klassen ---
 
 class KnowledgeBaseManager:
     """
-    Simulierte Implementierung eines KnowledgeBaseManagers.
-    Verwaltet die "Wissensbasis" für einen Agenten, simuliert durch eine einfache Textdatei
-    (`knowledge.json`), in der Wissenselemente zeilenweise gespeichert werden.
+    Verwaltet die Wissensbasis eines einzelnen Agenten.
+    Simuliert Persistenz durch Speicherung in einer JSON-Datei.
     """
-    KNOWLEDGE_FILE_NAME = "knowledge.json"
-
     def __init__(self, agent_path: str):
-        """
-        Initialisiert den KnowledgeBaseManager für einen spezifischen Agenten.
-
-        Args:
-            agent_path: Der Pfad zum Verzeichnis des Agenten.
-        """
         self.agent_path = agent_path
-        self._knowledge_file_path = os.path.join(self.agent_path, self.KNOWLEDGE_FILE_NAME)
-        logger.debug(f"KnowledgeBaseManager initialized for agent path: {agent_path}")
+        self.knowledge_file_path = os.path.join(agent_path, KNOWLEDGE_FILE_NAME)
+        # Stelle sicher, dass das Agentenverzeichnis existiert
+        os.makedirs(self.agent_path, exist_ok=True)
 
-    def _load_knowledge_from_file(self) -> List[str]:
-        """
-        Lädt das Wissen aus der simulierten Wissensdatei.
-
-        Returns:
-            Eine Liste von Wissenselementen (Strings).
-
-        Raises:
-            KnowledgeFlaskException: Bei Fehlern beim Lesen der Datei.
-        """
-        if not os.path.exists(self._knowledge_file_path):
+    def _load_knowledge_from_file(self) -> list[str]:
+        """Lädt die Wissensbasis aus der JSON-Datei."""
+        if not os.path.exists(self.knowledge_file_path):
             return []
         try:
-            with open(self._knowledge_file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                if not content.strip():  # Leere Datei behandeln
+            with open(self.knowledge_file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if not isinstance(data, list):
+                    print(f"Warnung: Wissensdatei '{self.knowledge_file_path}' enthält kein gültiges JSON-Array. Wird geleert.", file=sys.stderr)
                     return []
-                # Annahme: Wissen wird als ein Element pro Zeile gespeichert
-                return [line.strip() for line in content.splitlines() if line.strip()]
+                return [str(item) for item in data] # Stellen Sie sicher, dass alles Strings sind
+        except json.JSONDecodeError as e:
+            print(f"Fehler beim Decodieren der Wissensdatei '{self.knowledge_file_path}': {e}. Datei wird ignoriert.", file=sys.stderr)
+            return []
         except IOError as e:
-            logger.error(f"Error loading knowledge from '{self._knowledge_file_path}': {e}")
-            raise KnowledgeFlaskException(f"Failed to load knowledge: {e}")
+            raise KnowledgeFlaskException(f"Fehler beim Lesen der Wissensdatei '{self.knowledge_file_path}': {e}") from e
 
-    def _save_knowledge_to_file(self, knowledge_items: List[str]) -> None:
-        """
-        Speichert das Wissen in die simulierte Wissensdatei.
-
-        Args:
-            knowledge_items: Eine Liste von Wissenselementen (Strings), die gespeichert werden sollen.
-
-        Raises:
-            KnowledgeFlaskException: Bei Fehlern beim Schreiben in die Datei.
-        """
-        ensure_directory_exists(self.agent_path) # Sicherstellen, dass das Agentenverzeichnis existiert
+    def _save_knowledge_to_file(self, knowledge_data: list[str]):
+        """Speichert die Wissensbasis in die JSON-Datei."""
         try:
-            with open(self._knowledge_file_path, 'w', encoding='utf-8') as f:
-                for item in knowledge_items:
-                    f.write(item + '\n')
-            logger.debug(f"Knowledge saved to '{self._knowledge_file_path}'.")
+            with open(self.knowledge_file_path, 'w', encoding='utf-8') as f:
+                json.dump(knowledge_data, f, indent=2, ensure_ascii=False)
         except IOError as e:
-            logger.error(f"Error saving knowledge to '{self._knowledge_file_path}': {e}")
-            raise KnowledgeFlaskException(f"Failed to save knowledge: {e}")
+            raise KnowledgeFlaskException(f"Fehler beim Schreiben der Wissensdatei '{self.knowledge_file_path}': {e}") from e
 
-    def add_knowledge(self, item: str) -> None:
-        """
-        Fügt der Wissensbasis ein neues Element hinzu.
-        Simuliert das Hinzufügen von Informationen zu einer Vektordatenbank oder einem Dokumentenspeicher.
-
-        Args:
-            item: Das hinzuzufügende Wissenselement als String.
-        """
-        if not item:
-            logger.warning("Attempted to add empty knowledge item.")
-            return
-
-        current_knowledge = self._load_knowledge_from_file()
-        if item not in current_knowledge: # Für diese einfache Simulation Duplikate verhindern
-            current_knowledge.append(item)
-            self._save_knowledge_to_file(current_knowledge)
-            logger.info(f"Knowledge '{item}' added to knowledge base at '{self.agent_path}'.")
+    def add_knowledge(self, knowledge_item: str):
+        """Fügt ein Wissenselement hinzu, prüft auf Duplikate."""
+        knowledge = self._load_knowledge_from_file()
+        if knowledge_item not in knowledge:
+            knowledge.append(knowledge_item)
+            self._save_knowledge_to_file(knowledge)
+            print(f"Wissen hinzugefügt: '{knowledge_item[:50]}...'")
         else:
-            logger.info(f"Knowledge '{item}' already exists in knowledge base at '{self.agent_path}'. Skipping.")
+            print(f"Wissen '{knowledge_item[:50]}...' ist bereits vorhanden.")
 
-    def get_knowledge(self) -> List[str]:
-        """
-        Ruft alle Wissenselemente aus der Wissensbasis ab.
-
-        Returns:
-            Eine Liste von Wissenselementen.
-        """
+    def get_knowledge(self) -> list[str]:
+        """Gibt die gesamte Wissensbasis zurück."""
         return self._load_knowledge_from_file()
 
-    def query_knowledge(self, query: str) -> List[str]:
-        """
-        Simuliert eine Abfrage der Wissensbasis.
-        In einer echten Anwendung würde hier eine komplexe Suche (z.B. Vektorähnlichkeit) stattfinden.
-
-        Args:
-            query: Der Abfragetext.
-
-        Returns:
-            Eine Liste von Wissenselementen, die dem Abfragetext entsprechen.
-        """
-        logger.info(f"Simulating query '{query}' in knowledge base at '{self.agent_path}'.")
-        all_knowledge = self._load_knowledge_from_file()
-        # Einfache Textsuche als Simulation
-        results = [item for item in all_knowledge if query.lower() in item.lower()]
-        logger.debug(f"Found {len(results)} results for query '{query}'.")
-        return results
-
-    def delete_knowledge_base_file(self) -> None:
-        """
-        Löscht die simulierte Wissensdatei.
-
-        Raises:
-            KnowledgeFlaskException: Bei Fehlern beim Löschen der Datei.
-        """
-        if os.path.exists(self._knowledge_file_path):
+    def delete_knowledge_base_file(self):
+        """Löscht die Wissensbasis-Datei."""
+        if os.path.exists(self.knowledge_file_path):
             try:
-                os.remove(self._knowledge_file_path)
-                logger.debug(f"Knowledge base file '{self._knowledge_file_path}' deleted.")
+                os.remove(self.knowledge_file_path)
+                print(f"Wissensdatei '{KNOWLEDGE_FILE_NAME}' gelöscht.")
             except OSError as e:
-                logger.error(f"Error deleting knowledge base file '{self._knowledge_file_path}': {e}")
-                raise KnowledgeFlaskException(f"Failed to delete knowledge base file: {e}")
-
+                raise KnowledgeFlaskException(f"Fehler beim Löschen der Wissensdatei '{self.knowledge_file_path}': {e}") from e
 
 class VersionManager:
     """
-    Simulierte Implementierung eines VersionManagers.
-    Verwaltet Versionen der Wissensbasis eines Agenten, indem es Snapshots des Knowledge-Files
-    in einem separaten 'versions'-Verzeichnis speichert, zusammen mit Metadaten.
+    Verwaltet Versionen der Wissensbasis eines Agenten.
+    Jede Version ist ein Snapshot der knowledge.json.
     """
-    VERSIONS_DIR_NAME = "versions"
-    VERSION_METADATA_FILE = "metadata.json"
-
     def __init__(self, agent_path: str):
-        """
-        Initialisiert den VersionManager für einen spezifischen Agenten.
-
-        Args:
-            agent_path: Der Pfad zum Verzeichnis des Agenten.
-        """
         self.agent_path = agent_path
-        self._versions_dir = os.path.join(self.agent_path, self.VERSIONS_DIR_NAME)
-        ensure_directory_exists(self._versions_dir)
-        logger.debug(f"VersionManager initialized for agent path: {agent_path}")
+        self.versions_dir = os.path.join(agent_path, VERSIONS_DIR_NAME)
+        self.knowledge_file_path = os.path.join(agent_path, KNOWLEDGE_FILE_NAME)
+        os.makedirs(self.versions_dir, exist_ok=True)
 
-    def create_version(self, description: Optional[str], kb_manager: KnowledgeBaseManager) -> str:
-        """
-        Erstellt eine neue Version der aktuellen Wissensbasis.
-        Simuliert das Erstellen eines Snapshots, indem die aktuelle Wissensdatei kopiert wird.
+    def _get_version_path(self, version_id: str) -> str:
+        """Gibt den vollständigen Pfad zu einem Versionsverzeichnis zurück."""
+        return os.path.join(self.versions_dir, version_id)
 
-        Args:
-            description: Eine optionale Beschreibung für diese Version.
-            kb_manager: Die aktuelle KnowledgeBaseManager-Instanz des Agenten, deren Wissen versioniert wird.
+    def _get_version_metadata_file_path(self, version_path: str) -> str:
+        """Gibt den Pfad zur Metadaten-Datei einer Version zurück."""
+        return os.path.join(version_path, VERSION_METADATA_FILE_NAME)
 
-        Returns:
-            Die ID der neu erstellten Version (ein Zeitstempel).
-
-        Raises:
-            KnowledgeFlaskException: Bei Fehlern während des Erstellens der Version.
-        """
-        version_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        version_path = os.path.join(self._versions_dir, version_id)
-        ensure_directory_exists(version_path)
-
-        # Simulieren des Kopierens der aktuellen Wissensdatei
-        current_kb_file = kb_manager._knowledge_file_path # Zugriff auf den internen Pfad
-        versioned_kb_file = os.path.join(version_path, kb_manager.KNOWLEDGE_FILE_NAME)
-
-        if os.path.exists(current_kb_file):
-            try:
-                shutil.copyfile(current_kb_file, versioned_kb_file)
-                logger.debug(f"Copied current knowledge to version '{version_id}'.")
-            except shutil.Error as e:
-                logger.error(f"Error copying knowledge for version '{version_id}': {e}")
-                raise KnowledgeFlaskException(f"Failed to create version: {e}")
-        else:
-            logger.warning(f"No knowledge base file found for agent '{os.path.basename(self.agent_path)}'. Creating empty version.")
-            # Eine leere Datei für die Version erstellen, wenn das Original nicht existiert
-            with open(versioned_kb_file, 'w', encoding='utf-8') as f:
-                pass # Erstellt eine leere Datei
-
-        # Metadaten speichern
-        metadata = {
-            "version_id": version_id,
-            "timestamp": datetime.datetime.now().isoformat(),
-            "description": description if description else "No description provided."
-        }
-        metadata_file_path = os.path.join(version_path, self.VERSION_METADATA_FILE)
+    def _load_version_metadata(self, version_path: str) -> dict:
+        """Lädt Metadaten für eine bestimmte Version."""
+        metadata_file = self._get_version_metadata_file_path(version_path)
+        if not os.path.exists(metadata_file):
+            return {} # Keine Metadaten vorhanden
         try:
-            with open(metadata_file_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=4)
-            logger.info(f"Version '{version_id}' created for agent '{os.path.basename(self.agent_path)}'. Description: '{description}'.")
+            with open(metadata_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"Fehler beim Decodieren der Metadaten '{metadata_file}': {e}. Leere Metadaten werden zurückgegeben.", file=sys.stderr)
+            return {}
         except IOError as e:
-            logger.error(f"Error saving version metadata for '{version_id}': {e}")
-            raise KnowledgeFlaskException(f"Failed to save version metadata: {e}")
+            raise KnowledgeFlaskException(f"Fehler beim Lesen der Metadaten '{metadata_file}': {e}") from e
+
+    def _save_version_metadata(self, version_path: str, metadata: dict):
+        """Speichert Metadaten für eine bestimmte Version."""
+        metadata_file = self._get_version_metadata_file_path(version_path)
+        try:
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+        except IOError as e:
+            raise KnowledgeFlaskException(f"Fehler beim Schreiben der Metadaten '{metadata_file}': {e}") from e
+
+    def create_version(self, description: str = None) -> str:
+        """
+        Erstellt eine neue Version der Wissensbasis.
+        Kopiert die aktuelle knowledge.json und speichert Metadaten.
+        """
+        if not os.path.exists(self.knowledge_file_path):
+            raise KnowledgeFlaskException("Keine Wissensbasis vorhanden, um eine Version zu erstellen.")
+
+        version_id = str(uuid.uuid4()) # Eindeutige ID für die Version
+        version_path = self._get_version_path(version_id)
+        os.makedirs(version_path, exist_ok=True)
+
+        try:
+            shutil.copyfile(self.knowledge_file_path, os.path.join(version_path, KNOWLEDGE_FILE_NAME))
+        except shutil.Error as e:
+            raise KnowledgeFlaskException(f"Fehler beim Kopieren der Wissensdatei für Version '{version_id}': {e}") from e
+
+        metadata = {
+            "id": version_id,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "description": description if description else "Keine Beschreibung"
+        }
+        self._save_version_metadata(version_path, metadata)
         return version_id
 
-    def list_versions(self) -> List[Dict[str, Any]]:
+    def restore_version(self, version_id: str):
         """
-        Listet alle verfügbaren Versionen für den Agenten auf.
+        Stellt eine frühere Version der Wissensbasis wieder her.
+        Überschreibt die aktuelle knowledge.json.
+        """
+        version_path = self._get_version_path(version_id)
+        if not os.path.exists(version_path):
+            raise VersionNotFoundError(version_id)
 
-        Returns:
-            Eine Liste von Dictionaries, die Informationen zu jeder Version enthalten.
-            Beispiel: [{"version_id": "...", "timestamp": "...", "description": "..."}]
-        """
+        version_knowledge_file = os.path.join(version_path, KNOWLEDGE_FILE_NAME)
+        if not os.path.exists(version_knowledge_file):
+            raise KnowledgeFlaskException(f"Wissensdatei für Version '{version_id}' nicht gefunden. Version ist möglicherweise korrupt.")
+
+        try:
+            shutil.copyfile(version_knowledge_file, self.knowledge_file_path)
+            print(f"Wissensbasis von Version '{version_id}' erfolgreich wiederhergestellt.")
+        except shutil.Error as e:
+            raise KnowledgeFlaskException(f"Fehler beim Wiederherstellen der Version '{version_id}': {e}") from e
+
+    def list_versions(self) -> list[dict]:
+        """Listet alle verfügbaren Versionen mit Metadaten auf."""
         versions = []
-        if not os.path.exists(self._versions_dir):
+        if not os.path.exists(self.versions_dir):
             return versions
 
-        # Versionen nach ID (Zeitstempel) sortieren
-        for version_id in sorted(os.listdir(self._versions_dir)):
-            version_path = os.path.join(self._versions_dir, version_id)
-            metadata_file_path = os.path.join(version_path, self.VERSION_METADATA_FILE)
-
-            if os.path.isdir(version_path) and os.path.exists(metadata_file_path):
-                try:
-                    with open(metadata_file_path, 'r', encoding='utf-8') as f:
-                        metadata = json.load(f)
-                        versions.append(metadata)
-                except (IOError, json.JSONDecodeError) as e:
-                    logger.warning(f"Could not load metadata for version '{version_id}' at '{metadata_file_path}': {e}")
-                    # Fallback auf minimale Informationen, wenn Metadaten fehlerhaft sind
-                    versions.append({
-                        "version_id": version_id,
-                        "timestamp": "N/A",
-                        "description": "Metadata corrupted or missing."
-                    })
-            else:
-                logger.debug(f"Skipping non-version directory or missing metadata: {version_path}")
+        for version_id in os.listdir(self.versions_dir):
+            version_path = self._get_version_path(version_id)
+            if os.path.isdir(version_path):
+                metadata = self._load_version_metadata(version_path)
+                if metadata: # Stelle sicher, dass Metadaten geladen wurden
+                    versions.append(metadata)
+                else:
+                    versions.append({"id": version_id, "timestamp": "Unbekannt", "description": "Metadaten fehlen/fehlerhaft"})
+        
+        # Sortiere nach Zeitstempel absteigend
+        versions.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         return versions
 
-    def rollback_to_version(self, version_id: str, kb_manager: KnowledgeBaseManager) -> None:
-        """
-        Setzt die Wissensbasis des Agenten auf eine frühere Version zurück.
-
-        Args:
-            version_id: Die ID der Version, zu der zurückgerollt werden soll.
-            kb_manager: Die aktuelle KnowledgeBaseManager-Instanz des Agenten, deren Wissen zurückgesetzt wird.
-
-        Raises:
-            VersionNotFoundError: Wenn die angegebene Version nicht gefunden wird.
-            KnowledgeFlaskException: Bei Fehlern während des Rollbacks.
-        """
-        version_path = os.path.join(self._versions_dir, version_id)
-        versioned_kb_file = os.path.join(version_path, kb_manager.KNOWLEDGE_FILE_NAME)
-
-        if not os.path.exists(versioned_kb_file):
-            logger.error(f"Versioned knowledge file not found for version '{version_id}' at '{versioned_kb_file}'.")
-            raise VersionNotFoundError(os.path.basename(self.agent_path), version_id)
+    def delete_version(self, version_id: str):
+        """Löscht eine bestimmte Version."""
+        version_path = self._get_version_path(version_id)
+        if not os.path.exists(version_path):
+            raise VersionNotFoundError(version_id)
 
         try:
-            shutil.copyfile(versioned_kb_file, os.path.join(kb_manager.agent_path, kb_manager.KNOWLEDGE_FILE_NAME))
-            logger.info(f"Agent '{os.path.basename(self.agent_path)}' rolled back to version '{version_id}'.")
-        except shutil.Error as e:
-            logger.error(f"Error rolling back agent '{os.path.basename(self.agent_path)}' to version '{version_id}': {e}")
-            raise KnowledgeFlaskException(f"Failed to rollback to version '{version_id}': {e}")
-
-class KnowledgeAgent:
-    """
-    Simulierte Implementierung eines KnowledgeAgenten.
-    Repräsentiert einen einzelnen KI-Agenten mit seiner Wissensbasis und Versionsverwaltung.
-    Verwaltet das Agenten-Verzeichnis und delegiert Aufgaben an KnowledgeBaseManager und VersionManager.
-    """
-    def __init__(self, name: str):
-        """
-        Initialisiert einen KnowledgeAgenten.
-
-        Args:
-            name: Der eindeutige Name des Agenten.
-        """
-        self.name = name
-        self.agent_path = os.path.join(KF_AGENT_BASE_PATH, name)
-        self.kb_manager = KnowledgeBaseManager(self.agent_path)
-        self.version_manager = VersionManager(self.agent_path)
-        logger.debug(f"KnowledgeAgent '{name}' initialized at '{self.agent_path}'.")
-
-    def _ensure_agent_dir_exists(self) -> None:
-        """Stellt sicher, dass das Verzeichnis des Agenten existiert."""
-        ensure_directory_exists(self.agent_path)
-
-    def create(self, initial_knowledge: Optional[str] = None) -> None:
-        """
-        Erstellt den Agenten und seine initiale Wissensbasis.
-
-        Args:
-            initial_knowledge: Optionaler Startinhalt für die Wissensbasis.
-
-        Raises:
-            AgentAlreadyExistsError: Wenn ein Agent mit diesem Namen bereits existiert.
-            KnowledgeFlaskException: Bei allgemeinen Fehlern während der Erstellung.
-        """
-        if os.path.exists(self.agent_path):
-            raise AgentAlreadyExistsError(self.name)
-
-        self._ensure_agent_dir_exists()
-        if initial_knowledge:
-            self.kb_manager.add_knowledge(initial_knowledge)
-        logger.info(f"Agent '{self.name}' created successfully at '{self.agent_path}'.")
-
-    def delete(self) -> None:
-        """
-        Löscht den Agenten und alle zugehörigen Daten (Verzeichnis, Wissensbasis, Versionen).
-
-        Raises:
-            AgentNotFoundError: Wenn der Agent nicht gefunden wird.
-            KnowledgeFlaskException: Bei Fehlern während des Löschvorgangs.
-        """
-        if not os.path.exists(self.agent_path):
-            raise AgentNotFoundError(self.name)
-        try:
-            shutil.rmtree(self.agent_path)
-            logger.info(f"Agent '{self.name}' and all its data deleted successfully.")
+            shutil.rmtree(version_path)
+            print(f"Version '{version_id}' erfolgreich gelöscht.")
         except OSError as e:
-            logger.error(f"Error deleting agent '{self.name}' at '{self.agent_path}': {e}")
-            raise KnowledgeFlaskException(f"Failed to delete agent '{self.name}': {e}")
+            raise KnowledgeFlaskException(f"Fehler beim Löschen der Version '{version_id}': {e}") from e
 
-    def add_knowledge(self, item: str) -> None:
-        """
-        Fügt der Wissensbasis des Agenten ein Element hinzu.
+# --- 3. Hauptanwendungsklasse ---
 
-        Args:
-            item: Das hinzuzufügende Wissenselement.
-
-        Raises:
-            AgentNotFoundError: Wenn der Agent nicht gefunden wird.
-        """
-        if not os.path.exists(self.agent_path):
-            raise AgentNotFoundError(self.name)
-        self.kb_manager.add_knowledge(item)
-
-    def query(self, query_text: str) -> List[str]:
-        """
-        Führt eine Abfrage gegen die Wissensbasis des Agenten aus.
-
-        Args:
-            query_text: Der Abfragetext.
-
-        Returns:
-            Eine Liste von Ergebnissen aus der Wissensbasis.
-
-        Raises:
-            AgentNotFoundError: Wenn der Agent nicht gefunden wird.
-        """
-        if not os.path.exists(self.agent_path):
-            raise AgentNotFoundError(self.name)
-        return self.kb_manager.query_knowledge(query_text)
-
-    def get_all_knowledge(self) -> List[str]:
-        """
-        Ruft das gesamte Wissen des Agenten ab.
-
-        Returns:
-            Eine Liste aller Wissenselemente des Agenten.
-
-        Raises:
-            AgentNotFoundError: Wenn der Agent nicht gefunden wird.
-        """
-        if not os.path.exists(self.agent_path):
-            raise AgentNotFoundError(self.name)
-        return self.kb_manager.get_knowledge()
-
-    def create_version(self, description: Optional[str] = None) -> str:
-        """
-        Erstellt eine neue Version der Wissensbasis des Agenten.
-
-        Args:
-            description: Eine optionale Beschreibung für die Version.
-
-        Returns:
-            Die ID der neu erstellten Version.
-
-        Raises:
-            AgentNotFoundError: Wenn der Agent nicht gefunden wird.
-            KnowledgeFlaskException: Bei Fehlern während des Erstellens der Version.
-        """
-        if not os.path.exists(self.agent_path):
-            raise AgentNotFoundError(self.name)
-        return self.version_manager.create_version(description, self.kb_manager)
-
-    def list_versions(self) -> List[Dict[str, Any]]:
-        """
-        Listet alle Versionen der Wissensbasis des Agenten auf.
-
-        Returns:
-            Eine Liste von Dictionaries mit Versionsinformationen.
-
-        Raises:
-            AgentNotFoundError: Wenn der Agent nicht gefunden wird.
-        """
-        if not os.path.exists(self.agent_path):
-            raise AgentNotFoundError(self.name)
-        return self.version_manager.list_versions()
-
-    def rollback_to_version(self, version_id: str) -> None:
-        """
-        Setzt die Wissensbasis des Agenten auf eine bestimmte Version zurück.
-
-        Args:
-            version_id: Die ID der Version, zu der zurückgerollt werden soll.
-
-        Raises:
-            AgentNotFoundError: Wenn der Agent nicht gefunden wird.
-            VersionNotFoundError: Wenn die angegebene Version nicht existiert.
-            KnowledgeFlaskException: Bei Fehlern während des Rollbacks.
-        """
-        if not os.path.exists(self.agent_path):
-            raise AgentNotFoundError(self.name)
-        self.version_manager.rollback_to_version(version_id, self.kb_manager)
-
-# --- CLI Functions (Command Handlers) ---
-def _get_agent(name: str) -> KnowledgeAgent:
+class KnowledgeFlask:
     """
-    Hilfsfunktion, um eine Agenteninstanz abzurufen und dessen Existenz zu prüfen.
-
-    Args:
-        name: Der Name des Agenten.
-
-    Returns:
-        Eine KnowledgeAgent-Instanz.
-
-    Raises:
-        AgentNotFoundError: Wenn der Agent nicht gefunden wird.
+    Die zentrale Anwendungsklasse zur Verwaltung von Agenten,
+    deren Wissensbasen und Versionen.
     """
-    agent = KnowledgeAgent(name)
-    if not os.path.exists(agent.agent_path):
-        raise AgentNotFoundError(name)
-    return agent
+    def __init__(self, base_dir: str = KNOWLEDGE_FLASK_BASE_DIR):
+        self.base_dir = os.path.abspath(base_dir)
+        self.agents_dir = os.path.join(self.base_dir, AGENTS_DIR_NAME)
+        
+        try:
+            os.makedirs(self.agents_dir, exist_ok=True)
+        except OSError as e:
+            raise KnowledgeFlaskException(f"Fehler beim Initialisieren des Basisverzeichnisses '{self.agents_dir}': {e}") from e
 
-def cli_create_agent(args: argparse.Namespace) -> None:
-    """CLI handler for creating an agent."""
-    try:
-        agent = KnowledgeAgent(args.name)
-        agent.create(initial_knowledge=args.knowledge)
-        logger.info(f"Agent '{args.name}' created.")
-    except AgentAlreadyExistsError as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-    except KnowledgeFlaskException as e:
-        logger.error(f"An unexpected error occurred during agent creation: {e}")
-        sys.exit(1)
+    def _get_agent_path(self, agent_name: str) -> str:
+        """Gibt den vollständigen Pfad zu einem Agentenverzeichnis zurück."""
+        return os.path.join(self.agents_dir, agent_name)
 
-def cli_update_agent(args: argparse.Namespace) -> None:
-    """CLI handler for updating an agent's knowledge."""
-    try:
-        agent = _get_agent(args.name)
-        if args.add_knowledge:
-            agent.add_knowledge(args.add_knowledge)
-            logger.info(f"Knowledge added to agent '{args.name}'.")
-    except AgentNotFoundError as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-    except KnowledgeFlaskException as e:
-        logger.error(f"An unexpected error occurred during agent update: {e}")
-        sys.exit(1)
+    def _agent_exists(self, agent_name: str) -> bool:
+        """Prüft, ob ein Agentenverzeichnis existiert."""
+        return os.path.isdir(self._get_agent_path(agent_name))
 
-def cli_query_agent(args: argparse.Namespace) -> None:
-    """CLI handler for querying an agent."""
-    try:
-        agent = _get_agent(args.name)
-        results = agent.query(args.query_text)
-        if results:
-            print(f"Query results for agent '{args.name}':")
-            for i, result in enumerate(results):
-                print(f"  {i+1}. {result}")
-        else:
-            print(f"No results found for query '{args.query_text}' in agent '{args.name}'.")
-    except AgentNotFoundError as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-    except KnowledgeFlaskException as e:
-        logger.error(f"An unexpected error occurred during agent query: {e}")
-        sys.exit(1)
+    def create_agent(self, agent_name: str):
+        """Erstellt einen neuen Agenten."""
+        agent_path = self._get_agent_path(agent_name)
+        if self._agent_exists(agent_name):
+            raise AgentAlreadyExistsError(agent_name)
+        
+        try:
+            os.makedirs(agent_path)
+            # Initialisiere die KnowledgeBase für den neuen Agenten
+            KnowledgeBaseManager(agent_path)._save_knowledge_to_file([]) 
+            VersionManager(agent_path) # Stellen Sie sicher, dass der Versionsordner initialisiert wird
+            print(f"Agent '{agent_name}' erfolgreich erstellt in '{agent_path}'.")
+        except OSError as e:
+            raise KnowledgeFlaskException(f"Fehler beim Erstellen des Agenten '{agent_name}': {e}") from e
 
-def cli_list_agents(args: argparse.Namespace) -> None:
-    """CLI handler for listing all agents."""
-    try:
-        ensure_directory_exists(KF_AGENT_BASE_PATH)
-        # Liste aller Verzeichnisse, die als Agenten angesehen werden
-        agent_names = [d for d in os.listdir(KF_AGENT_BASE_PATH) if os.path.isdir(os.path.join(KF_AGENT_BASE_PATH, d))]
+    def delete_agent(self, agent_name: str):
+        """Löscht einen bestehenden Agenten und all seine Daten."""
+        agent_path = self._get_agent_path(agent_name)
+        if not self._agent_exists(agent_name):
+            raise AgentNotFoundError(agent_name)
+        
+        try:
+            shutil.rmtree(agent_path)
+            print(f"Agent '{agent_name}' und alle zugehörigen Daten wurden erfolgreich gelöscht.")
+        except OSError as e:
+            raise KnowledgeFlaskException(f"Fehler beim Löschen des Agenten '{agent_name}': {e}") from e
+        except shutil.Error as e:
+            raise KnowledgeFlaskException(f"Fehler beim Löschen des Agentenverzeichnisses '{agent_name}': {e}") from e
 
-        if not agent_names:
-            print("No KnowledgeFlask agents found.")
-            return
+    def list_agents(self) -> list[str]:
+        """Listet alle vorhandenen Agenten auf."""
+        if not os.path.exists(self.agents_dir):
+            return []
+        agents = [d for d in os.listdir(self.agents_dir) if os.path.isdir(self._get_agent_path(d))]
+        return sorted(agents)
 
-        print("KnowledgeFlask Agents:")
-        for name in sorted(agent_names):
-            print(f"- {name}")
-            if args.verbose:
-                try:
-                    agent = KnowledgeAgent(name)
-                    knowledge = agent.get_all_knowledge()
-                    versions = agent.list_versions()
-                    print(f"  Path: {agent.agent_path}")
-                    print(f"  Knowledge items: {len(knowledge)}")
-                    print(f"  Versions: {len(versions)}")
-                except KnowledgeFlaskException as e:
-                    logger.warning(f"Could not retrieve full details for agent '{name}': {e}")
-                    print(f"  (Details unavailable: {e})")
-    except KnowledgeFlaskException as e:
-        logger.error(f"An unexpected error occurred while listing agents: {e}")
-        sys.exit(1)
+    def add_knowledge(self, agent_name: str, knowledge_item: str):
+        """Fügt einem Agenten Wissen hinzu."""
+        agent_path = self._get_agent_path(agent_name)
+        if not self._agent_exists(agent_name):
+            raise AgentNotFoundError(agent_name)
+        
+        kb_manager = KnowledgeBaseManager(agent_path)
+        kb_manager.add_knowledge(knowledge_item)
 
-def cli_delete_agent(args: argparse.Namespace) -> None:
-    """CLI handler for deleting an agent."""
-    try:
-        # Hier nicht _get_agent verwenden, da delete interne Prüfung auf Nicht-Existenz handhabt
-        agent = KnowledgeAgent(args.name)
-        agent.delete()
-        logger.info(f"Agent '{args.name}' deleted.")
-    except AgentNotFoundError as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-    except KnowledgeFlaskException as e:
-        logger.error(f"An unexpected error occurred during agent deletion: {e}")
-        sys.exit(1)
+    def get_knowledge(self, agent_name: str) -> list[str]:
+        """Ruft die Wissensbasis eines Agenten ab."""
+        agent_path = self._get_agent_path(agent_name)
+        if not self._agent_exists(agent_name):
+            raise AgentNotFoundError(agent_name)
+        
+        kb_manager = KnowledgeBaseManager(agent_path)
+        return kb_manager.get_knowledge()
 
-def cli_version_agent(args: argparse.Namespace) -> None:
-    """CLI handler for agent versioning operations."""
-    try:
-        agent = _get_agent(args.name)
+    def create_version(self, agent_name: str, description: str = None) -> str:
+        """Erstellt eine Version der Wissensbasis eines Agenten."""
+        agent_path = self._get_agent_path(agent_name)
+        if not self._agent_exists(agent_name):
+            raise AgentNotFoundError(agent_name)
+        
+        version_manager = VersionManager(agent_path)
+        version_id = version_manager.create_version(description)
+        print(f"Version '{version_id}' für Agent '{agent_name}' erfolgreich erstellt.")
+        return version_id
 
-        if args.version_command == 'create':
-            version_id = agent.create_version(description=args.description)
-            print(f"New version '{version_id}' created for agent '{args.name}'.")
-        elif args.version_command == 'list':
-            versions = agent.list_versions()
-            if versions:
-                print(f"Versions for agent '{args.name}':")
-                for v in versions:
-                    print(f"  ID: {v['version_id']} | Timestamp: {v['timestamp']} | Description: {v['description']}")
-            else:
-                print(f"No versions found for agent '{args.name}'.")
-        elif args.version_command == 'rollback':
-            agent.rollback_to_version(args.version_id)
-            print(f"Agent '{args.name}' rolled back to version '{args.version_id}'.")
-    except AgentNotFoundError as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-    except VersionNotFoundError as e:
-        logger.error(f"Error: {e}")
-        sys.exit(1)
-    except KnowledgeFlaskException as e:
-        logger.error(f"An unexpected error occurred during version operation: {e}")
-        sys.exit(1)
+    def restore_version(self, agent_name: str, version_id: str):
+        """Stellt eine Version der Wissensbasis eines Agenten wieder her."""
+        agent_path = self._get_agent_path(agent_name)
+        if not self._agent_exists(agent_name):
+            raise AgentNotFoundError(agent_name)
+        
+        version_manager = VersionManager(agent_path)
+        version_manager.restore_version(version_id)
+        print(f"Version '{version_id}' für Agent '{agent_name}' erfolgreich wiederhergestellt.")
 
-# --- Main CLI Parser Setup ---
+    def list_versions(self, agent_name: str) -> list[dict]:
+        """Listet alle Versionen eines Agenten auf."""
+        agent_path = self._get_agent_path(agent_name)
+        if not self._agent_exists(agent_name):
+            raise AgentNotFoundError(agent_name)
+        
+        version_manager = VersionManager(agent_path)
+        return version_manager.list_versions()
+
+    def delete_version(self, agent_name: str, version_id: str):
+        """Löscht eine Version der Wissensbasis eines Agenten."""
+        agent_path = self._get_agent_path(agent_name)
+        if not self._agent_exists(agent_name):
+            raise AgentNotFoundError(agent_name)
+        
+        version_manager = VersionManager(agent_path)
+        version_manager.delete_version(version_id)
+        print(f"Version '{version_id}' für Agent '{agent_name}' erfolgreich gelöscht.")
+
+# --- 4. CLI Interface (argparse) ---
+
 def main():
-    """
-    Hauptfunktion für die Befehlszeilenschnittstelle (CLI) von KnowledgeFlask.
-    Konfiguriert Argument-Parser und ruft die entsprechenden Handler auf.
-    """
-    # Sicherstellen, dass der Basisverzeichnis beim Anwendungsstart existiert
-    ensure_directory_exists(KF_AGENT_BASE_PATH)
-
     parser = argparse.ArgumentParser(
-        prog='kf', # Der Name des Programms, wie es auf der Kommandozeile aufgerufen wird
-        description="KnowledgeFlask CLI: Create, query, manage, and version AI agents.",
-        formatter_class=argparse.RawTextHelpFormatter # Für bessere Formatierung der Hilfe-Nachrichten
+        description="KnowledgeFlask CLI: Verwalte KI-Agenten, Wissensbasen und Versionen.",
+        formatter_class=argparse.RawTextHelpFormatter # Behält Formatierung in Hilfetexten bei
     )
-    # Globales Argument für das Log-Level
+    
+    # Globales Argument für das Basisverzeichnis (optional)
     parser.add_argument(
-        '--log-level',
-        default='INFO',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        help='Set the logging level (default: INFO)'
+        "--base-dir", 
+        default=KNOWLEDGE_FLASK_BASE_DIR, 
+        help=f"Basisverzeichnis für KnowledgeFlask-Daten (Standard: {KNOWLEDGE_FLASK_BASE_DIR})"
     )
 
-    # Subparser für verschiedene Befehle (create, update, query, list, delete, version)
-    subparsers = parser.add_subparsers(dest='command', required=True, help='Available commands')
+    subparsers = parser.add_subparsers(dest="command", help="Verfügbare Befehle")
 
-    # CREATE command
-    create_parser = subparsers.add_parser(
-        'create',
-        help='Create a new KnowledgeFlask agent.',
-        description='Creates a new AI agent with a unique name and an optional initial knowledge item.'
-    )
-    create_parser.add_argument(
-        'name',
-        type=str,
-        help='The unique name for the new agent.'
-    )
-    create_parser.add_argument(
-        '--knowledge',
-        type=str,
-        help='An optional initial knowledge item to add to the agent.'
-    )
-    create_parser.set_defaults(func=cli_create_agent)
+    # --- Agent Commands ---
+    agent_parser = subparsers.add_parser("agent", help="Verwalte Agenten.")
+    agent_subparsers = agent_parser.add_subparsers(dest="agent_command", help="Agenten-Operationen")
 
-    # UPDATE command (speziell zum Hinzufügen von Wissen)
-    update_parser = subparsers.add_parser(
-        'update',
-        help='Update an existing KnowledgeFlask agent.',
-        description='Updates an existing AI agent, for example, by adding new knowledge items.'
-    )
-    update_parser.add_argument(
-        'name',
-        type=str,
-        help='The name of the agent to update.'
-    )
-    update_parser.add_argument(
-        '--add-knowledge',
-        type=str,
-        required=True, # Vorerst impliziert 'update', dass Wissen hinzugefügt wird
-        help='A new knowledge item to add to the agent.'
-    )
-    update_parser.set_defaults(func=cli_update_agent)
+    # agent create
+    agent_create_parser = agent_subparsers.add_parser("create", help="Erstelle einen neuen Agenten.")
+    agent_create_parser.add_argument("name", help="Der Name des Agenten.")
 
-    # QUERY command
-    query_parser = subparsers.add_parser(
-        'query',
-        help='Query a KnowledgeFlask agent.',
-        description='Queries an existing AI agent\'s knowledge base with a given text.'
-    )
-    query_parser.add_argument(
-        'name',
-        type=str,
-        help='The name of the agent to query.'
-    )
-    query_parser.add_argument(
-        'query_text',
-        type=str,
-        help='The text to query against the agent\'s knowledge base.'
-    )
-    query_parser.set_defaults(func=cli_query_agent)
+    # agent delete
+    agent_delete_parser = agent_subparsers.add_parser("delete", help="Lösche einen Agenten.")
+    agent_delete_parser.add_argument("name", help="Der Name des zu löschenden Agenten.")
 
-    # LIST command
-    list_parser = subparsers.add_parser(
-        'list',
-        help='List all KnowledgeFlask agents.',
-        description='Lists all AI agents currently managed by KnowledgeFlask.'
-    )
-    list_parser.add_argument(
-        '-v', '--verbose',
-        action='store_true',
-        help='Show verbose details for each agent (path, knowledge count, versions).'
-    )
-    list_parser.set_defaults(func=cli_list_agents)
+    # agent list
+    agent_list_parser = agent_subparsers.add_parser("list", help="Liste alle Agenten auf.")
 
-    # DELETE command
-    delete_parser = subparsers.add_parser(
-        'delete',
-        help='Delete a KnowledgeFlask agent.',
-        description='Deletes an existing AI agent and all its associated data.'
-    )
-    delete_parser.add_argument(
-        'name',
-        type=str,
-        help='The name of the agent to delete.'
-    )
-    delete_parser.set_defaults(func=cli_delete_agent)
+    # --- Knowledge Commands ---
+    knowledge_parser = subparsers.add_parser("knowledge", help="Verwalte die Wissensbasis eines Agenten.")
+    knowledge_subparsers = knowledge_parser.add_subparsers(dest="knowledge_command", help="Wissensbasis-Operationen")
 
-    # VERSION command (mit Unter-Unter-Parsern)
-    version_parser = subparsers.add_parser(
-        'version',
-        help='Manage versions for a KnowledgeFlask agent.',
-        description='Allows creation, listing, and rollback of agent knowledge base versions.'
-    )
-    version_parser.add_argument(
-        'name',
-        type=str,
-        help='The name of the agent for versioning operations.'
-    )
-    version_subparsers = version_parser.add_subparsers(
-        dest='version_command',
-        required=True,
-        help='Version commands'
-    )
+    # knowledge add
+    knowledge_add_parser = knowledge_subparsers.add_parser("add", help="Füge Wissen zu einem Agenten hinzu.")
+    knowledge_add_parser.add_argument("agent_name", help="Der Name des Agenten.")
+    knowledge_add_parser.add_argument("item", help="Das hinzuzufügende Wissenselement (Text).")
 
-    # VERSION CREATE
-    version_create_parser = version_subparsers.add_parser(
-        'create',
-        help='Create a new version of the agent\'s knowledge base.'
-    )
-    version_create_parser.add_argument(
-        '--description',
-        type=str,
-        help='A descriptive note for this version.'
-    )
-    version_create_parser.set_defaults(func=cli_version_agent)
+    # knowledge get
+    knowledge_get_parser = knowledge_subparsers.add_parser("get", help="Zeige die Wissensbasis eines Agenten an.")
+    knowledge_get_parser.add_argument("agent_name", help="Der Name des Agenten.")
 
-    # VERSION LIST
-    version_list_parser = version_subparsers.add_parser(
-        'list',
-        help='List all versions for the agent.'
-    )
-    version_list_parser.set_defaults(func=cli_version_agent)
+    # --- Version Commands ---
+    version_parser = subparsers.add_parser("version", help="Verwalte Versionen der Wissensbasis eines Agenten.")
+    version_subparsers = version_parser.add_subparsers(dest="version_command", help="Versionierungs-Operationen")
 
-    # VERSION ROLLBACK
-    version_rollback_parser = version_subparsers.add_parser(
-        'rollback',
-        help='Rollback the agent\'s knowledge base to a specific version.'
-    )
-    version_rollback_parser.add_argument(
-        'version_id',
-        type=str,
-        help='The ID of the version to rollback to (e.g., a timestamp like "20231027153000").'
-    )
-    version_rollback_parser.set_defaults(func=cli_version_agent)
+    # version create
+    version_create_parser = version_subparsers.add_parser("create", help="Erstelle eine neue Version der Wissensbasis.")
+    version_create_parser.add_argument("agent_name", help="Der Name des Agenten.")
+    version_create_parser.add_argument("-d", "--description", help="Eine Beschreibung für diese Version (optional).")
 
+    # version restore
+    version_restore_parser = version_subparsers.add_parser("restore", help="Stelle eine Version der Wissensbasis wieder her.")
+    version_restore_parser.add_argument("agent_name", help="Der Name des Agenten.")
+    version_restore_parser.add_argument("version_id", help="Die ID der wiederherzustellenden Version.")
+
+    # version list
+    version_list_parser = version_subparsers.add_parser("list", help="Liste alle Versionen eines Agenten auf.")
+    version_list_parser.add_argument("agent_name", help="Der Name des Agenten.")
+
+    # version delete
+    version_delete_parser = version_subparsers.add_parser("delete", help="Lösche eine Version der Wissensbasis.")
+    version_delete_parser.add_argument("agent_name", help="Der Name des Agenten.")
+    version_delete_parser.add_argument("version_id", help="Die ID der zu löschenden Version.")
 
     args = parser.parse_args()
 
-    # Globales Log-Level setzen, basierend auf dem CLI-Argument
-    logger.setLevel(args.log_level.upper())
-    # Sicherstellen, dass auch der Root-Logger das Level hat, falls andere Module ihn nutzen würden
-    logging.getLogger().setLevel(args.log_level.upper())
-
-
-    # Die Funktion des gewählten Befehls ausführen
-    if hasattr(args, 'func'):
-        args.func(args)
-    else:
-        # Dies sollte wegen 'required=True' bei subparsers selten erreicht werden
+    # Wenn kein Unterbefehl angegeben wurde, zeige Hilfe
+    if args.command is None:
         parser.print_help()
+        sys.exit(0)
+    
+    # Initialisiere die KnowledgeFlask-Anwendung
+    try:
+        kf_app = KnowledgeFlask(base_dir=args.base_dir)
+    except KnowledgeFlaskException as e:
+        print(f"Fehler beim Initialisieren von KnowledgeFlask: {e}", file=sys.stderr)
+        sys.exit(1)
 
+    try:
+        if args.command == "agent":
+            if args.agent_command == "create":
+                kf_app.create_agent(args.name)
+            elif args.agent_command == "delete":
+                kf_app.delete_agent(args.name)
+            elif args.agent_command == "list":
+                agents = kf_app.list_agents()
+                if agents:
+                    print("Verfügbare Agenten:")
+                    for agent in agents:
+                        print(f"  - {agent}")
+                else:
+                    print("Keine Agenten gefunden.")
+            else:
+                agent_parser.print_help()
+                sys.exit(1)
+
+        elif args.command == "knowledge":
+            if args.knowledge_command == "add":
+                kf_app.add_knowledge(args.agent_name, args.item)
+            elif args.knowledge_command == "get":
+                knowledge = kf_app.get_knowledge(args.agent_name)
+                if knowledge:
+                    print(f"Wissensbasis für Agent '{args.agent_name}':")
+                    for i, item in enumerate(knowledge):
+                        print(f"  {i+1}. {item}")
+                else:
+                    print(f"Wissensbasis für Agent '{args.agent_name}' ist leer.")
+            else:
+                knowledge_parser.print_help()
+                sys.exit(1)
+
+        elif args.command == "version":
+            if args.version_command == "create":
+                kf_app.create_version(args.agent_name, args.description)
+            elif args.version_command == "restore":
+                kf_app.restore_version(args.agent_name, args.version_id)
+            elif args.version_command == "list":
+                versions = kf_app.list_versions(args.agent_name)
+                if versions:
+                    print(f"Versionen für Agent '{args.agent_name}':")
+                    for version in versions:
+                        print(f"  ID: {version.get('id', 'N/A')}")
+                        print(f"    Zeitstempel: {version.get('timestamp', 'N/A')}")
+                        print(f"    Beschreibung: {version.get('description', 'N/A')}")
+                        print("-" * 20)
+                else:
+                    print(f"Keine Versionen für Agent '{args.agent_name}' gefunden.")
+            elif args.version_command == "delete":
+                kf_app.delete_version(args.agent_name, args.version_id)
+            else:
+                version_parser.print_help()
+                sys.exit(1)
+
+    except KnowledgeFlaskException as e:
+        print(f"Fehler: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Ein unerwarteter Fehler ist aufgetreten: {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
+
+
+---
+
+### So benutzt du den Code:
+
+1.  **Speichern**: Speichere den Code als `knowledgeflask.py` (oder einen anderen Namen).
+2.  **Ausführen (CLI)**: Öffne ein Terminal und navigiere in das Verzeichnis, in dem du die Datei gespeichert hast. Dann kannst du Befehle wie folgt ausführen:
+
+    bash
+    # Hilfe anzeigen
+    python knowledgeflask.py --help
+    python knowledgeflask.py agent --help
+    python knowledgeflask.py knowledge --help
+    python knowledgeflask.py version --help
+
+    # Agenten erstellen
+    python knowledgeflask.py agent create MeinErsterAgent
+    python knowledgeflask.py agent create Assistent007
+
+    # Agenten auflisten
+    python knowledgeflask.py agent list
+
+    # Wissen hinzufügen
+    python knowledgeflask.py knowledge add MeinErsterAgent "Die Sonne ist ein Stern."
+    python knowledgeflask.py knowledge add MeinErsterAgent "Erde dreht sich um die Sonne."
+    python knowledgeflask.py knowledge add Assistent007 "KI lernt aus Daten."
+
+    # Wissen eines Agenten anzeigen
+    python knowledgeflask.py knowledge get MeinErsterAgent
+    python knowledgeflask.py knowledge get Assistent007
+
+    # Eine Version der Wissensbasis erstellen
+    python knowledgeflask.py version create MeinErsterAgent -d "Wissen über Astronomie hinzugefügt."
+    # Eine weitere Version nach Änderungen
+    python knowledgeflask.py knowledge add MeinErsterAgent "Der Mond dreht sich um die Erde."
+    python knowledgeflask.py version create MeinErsterAgent -d "Mondwissen hinzugefügt."
+
+    # Versionen eines Agenten auflisten
+    python knowledgeflask.py version list MeinErsterAgent
+
+    # Eine spezifische Version wiederherstellen (ersetze <version_id> mit einer echten ID aus 'version list')
+    # z.B. python knowledgeflask.py version restore MeinErsterAgent 123e4567-e89b-12d3-a456-426614174000
+
+    # Eine Version löschen (ersetze <version_id>)
+    # z.g. python knowledgeflask.py version delete MeinErsterAgent 123e4567-e89b-12d3-a456-426614174000
+
+    # Agenten und alle Daten löschen
+    python knowledgeflask.py agent delete MeinErsterAgent
+    
+
+### Erläuterungen und Features:
+
+*   **Basisverzeichnis**: Alle Daten werden standardmäßig in einem `.knowledge_flask`-Verzeichnis in deinem Home-Verzeichnis gespeichert (`~/.knowledge_flask`). Du kannst dies mit `--base-dir` ändern.
+*   **Fehlerbehandlung**: Jeder kritische Schritt ist in `try...except` Blöcke gehüllt. Eigene Exceptions (`AgentNotFoundError`, `AgentAlreadyExistsError`, `VersionNotFoundError`, `KnowledgeFlaskException`) werden für spezifische Fehlerfälle verwendet. Unerwartete Fehler werden abgefangen und führen zu einer aussagekräftigen Fehlermeldung und einem `sys.exit(1)`.
+*   **`KnowledgeBaseManager`**:
+    *   Verwendet `knowledge.json` als Liste von Strings.
+    *   `add_knowledge` prüft auf Duplikate, bevor ein Element hinzugefügt wird.
+    *   `_load_knowledge_from_file` und `_save_knowledge_to_file` kapseln den Dateizugriff und die Fehlerbehandlung für JSON.
+*   **`VersionManager`**:
+    *   Erstellt ein `versions`-Unterverzeichnis pro Agent.
+    *   Jede Version bekommt eine eindeutige UUID und ein eigenes Verzeichnis mit einem Snapshot der `knowledge.json` und einer `version_meta.json` (für Zeitstempel und Beschreibung).
+    *   `list_versions` sortiert die Versionen nach Zeitstempel (neueste zuerst).
+    *   `restore_version` kopiert die Wissensbasis einer älteren Version zurück in die aktuelle.
+*   **CLI mit `argparse`**: Die Kommandozeilenschnittstelle ist klar strukturiert mit Unterbefehlen für `agent`, `knowledge` und `version`, was eine intuitive Bedienung ermöglicht.
+*   **Duplikate**: Beim Hinzufügen von Wissen wird geprüft, ob der exakte String bereits in der Wissensbasis vorhanden ist.
+
+Dieser Code deckt alle deine genannten Punkte ab und bietet eine solide Grundlage für die weitere Entwicklung deines 'KnowledgeFlask'-Projekts!
